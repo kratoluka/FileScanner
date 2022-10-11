@@ -1,8 +1,8 @@
 import argparse
 import json
 import os
+import asyncio
 from datetime import datetime
-import subprocess
 
 DEFAULT_DIRECTORY = '.\\'
 DEFAULT_VERBOSE = 0
@@ -41,12 +41,30 @@ def compare_files(verbose, file_name, file_old, file_new, log):
 
 def scan(directory, json_file):
     metadata = {}
+    for direct in directory:
+        for root, dirs, files in os.walk(direct):
+            for file in files:
+                file_name = os.path.join(root, file)
+                metadata[file_name] = file_info(file_name)
+    with open(json_file, 'w', encoding='utf-8') as f:
+        json.dump(metadata, f, indent=INDENT)
+
+
+async def async_scan(directory_list, metadata_file):
+    metadata = await asyncio.gather(*[scan_dir(directory) for directory in directory_list])
+    metadata = {key: value for d in metadata for key, value in d.items()}
+    with open(metadata_file, 'w', encoding='utf-8') as f:
+        json.dump(metadata, f, indent=INDENT)
+
+
+async def scan_dir(directory):
+    metadata = {}
     for root, dirs, files in os.walk(directory):
         for file in files:
             file_name = os.path.join(root, file)
             metadata[file_name] = file_info(file_name)
-    with open(json_file, 'w', encoding='utf-8') as f:
-        json.dump(metadata, f, indent=INDENT)
+    await asyncio.sleep(1)
+    return metadata
 
 
 def detect(arguments, log):
@@ -65,25 +83,61 @@ def detect(arguments, log):
             print('Removed file: ' + file_name, file=log)
 
 
+async def async_detect(arguments, log):
+    with open(arguments.metadata, 'r', encoding='utf-8') as f:
+        metadata = json.load(f)
+        metadata_files = list(metadata.keys())
+        file_list = await asyncio.gather(*[detect_dir(directory, arguments, metadata, log) for directory in arguments.directory])
+        file_list = [item for sublist in file_list for item in sublist]
+        for file in metadata_files:
+            if file not in file_list:
+                print('Removed file: ' + file, file=log)
+
+
+async def detect_dir(directory, arguments, metadata, log):
+    file_list = []
+    metadata_files = list(metadata.keys())
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            file_name = os.path.join(root, file)
+            file_list.append(file_name)
+            if file_name not in metadata_files:
+                print('New file: ' + file_name, file=log)
+            else:
+                compare_files(arguments.verbose, file_name, metadata[file_name], file_info(file_name), log)
+    await asyncio.sleep(1)
+    return file_list
+
+
 def main(arguments):
     if arguments.run_option == 'scan':
-        scan(arguments.directory, arguments.metadata)
+        if arguments.asyncio:
+            asyncio.run(async_scan(arguments.directory, arguments.metadata))
+        else:
+            scan(arguments.directory, arguments.metadata)
     else:
         if arguments.log:
             with open(arguments.log, 'a') as log:
                 print('-'*20, file=log)
-                detect(arguments, log)
+                if arguments.asyncio:
+                    asyncio.run(async_detect(arguments, log))
+                else:
+                    detect(arguments, log)
         else:
-            detect(arguments, None)
+            if arguments.asyncio:
+                asyncio.run(async_detect(arguments, None))
+            else:
+                detect(arguments, None)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('run_option', choices=['scan', 'detect'])
-    parser.add_argument('-d', '--directory', type=str, default=DEFAULT_DIRECTORY)
+    parser.add_argument('-d', '--directory', type=str, nargs='+', default=[DEFAULT_DIRECTORY])
     parser.add_argument('-v', '--verbose', type=int, default=DEFAULT_VERBOSE)
     parser.add_argument('-m', '--metadata', type=str, default=DEFAULT_METADATA_FILE)
     parser.add_argument('-l', '--log', type=str, default=None)
+    parser.add_argument('-a', '--asyncio', action='store_true', default=False)
 
     args = parser.parse_args()
 
