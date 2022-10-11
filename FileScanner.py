@@ -12,6 +12,10 @@ INDENT = 4 * ' '
 
 
 def file_info(file):
+    """
+    Take file path and get the files metadata
+    Return a dictionary with file info
+    """
     info = {}
     info['size'] = os.path.getsize(file)
     info['time_modified'] = os.path.getmtime(file)
@@ -20,11 +24,11 @@ def file_info(file):
     return info
 
 
-def uncase(text):
-    return ' '.join(text.split('_')).capitalize()
-
-
 def compare_files(verbose, file_name, file_old, file_new, log):
+    """
+    Take file info of two files and compare them
+    Print results accordingly to verbose
+    """
     if file_old != file_new:
         print('Changes in file: ' + file_name, file=log)
         if verbose > 0:
@@ -39,10 +43,14 @@ def compare_files(verbose, file_name, file_old, file_new, log):
                           (verbose > 1) * f" from {old_value} to {new_value}", file=log)
 
 
-def scan(directory, json_file):
+def scan(directory_list, json_file):
+    """
+    Go through all directories and all directories within them to maximum depth
+    Output metadata of every file within scanned directories to specified json file
+    """
     metadata = {}
-    for direct in directory:
-        for root, dirs, files in os.walk(direct):
+    for directory in directory_list:
+        for root, dirs, files in os.walk(directory):
             for file in files:
                 file_name = os.path.join(root, file)
                 metadata[file_name] = file_info(file_name)
@@ -51,6 +59,10 @@ def scan(directory, json_file):
 
 
 async def async_scan(directory_list, metadata_file):
+    """
+    Asynchronously get scan result for every directory in list
+    Output results to specified json file
+    """
     metadata = await asyncio.gather(*[scan_dir(directory) for directory in directory_list])
     metadata = {key: value for d in metadata for key, value in d.items()}
     with open(metadata_file, 'w', encoding='utf-8') as f:
@@ -58,6 +70,10 @@ async def async_scan(directory_list, metadata_file):
 
 
 async def scan_dir(directory):
+    """
+    Go through all directories and all directories within them to maximum depth
+    Output metadata of every file within scanned directories to specified json file
+    """
     metadata = {}
     for root, dirs, files in os.walk(directory):
         for file in files:
@@ -68,6 +84,10 @@ async def scan_dir(directory):
 
 
 def detect(arguments, log):
+    """
+    Go through all directories and all directories within them to maximum depth
+    Compare current file metadata with metadata previously recorded using scan
+    """
     with open(arguments.metadata, 'r', encoding='utf-8') as f:
         metadata = json.load(f)
         file_list = list(metadata.keys())
@@ -84,17 +104,25 @@ def detect(arguments, log):
 
 
 async def async_detect(arguments, log):
+    """
+    Asynchronously get detect results for every directory in list
+    Check for removed files
+    """
     with open(arguments.metadata, 'r', encoding='utf-8') as f:
         metadata = json.load(f)
         metadata_files = list(metadata.keys())
         file_list = await asyncio.gather(*[detect_dir(directory, arguments, metadata, log) for directory in arguments.directory])
-        file_list = [item for sublist in file_list for item in sublist]
+        file_list = [item for sublist in file_list for item in sublist]  # add together lists from a list of lists
         for file in metadata_files:
             if file not in file_list:
                 print('Removed file: ' + file, file=log)
 
 
 async def detect_dir(directory, arguments, metadata, log):
+    """
+    Go through all directories and all directories within them to maximum depth
+    Compare current file metadata with metadata previously recorded using scan
+    """
     file_list = []
     metadata_files = list(metadata.keys())
     for root, dirs, files in os.walk(directory):
@@ -110,6 +138,9 @@ async def detect_dir(directory, arguments, metadata, log):
 
 
 def main(arguments):
+    """
+    Accordingly run requested command
+    """
     if arguments.run_option == 'scan':
         if arguments.asyncio:
             asyncio.run(async_scan(arguments.directory, arguments.metadata))
@@ -134,9 +165,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('run_option', choices=['scan', 'detect'])
     parser.add_argument('-d', '--directory', type=str, nargs='+', default=[DEFAULT_DIRECTORY])
-    parser.add_argument('-v', '--verbose', type=int, default=DEFAULT_VERBOSE)
     parser.add_argument('-m', '--metadata', type=str, default=DEFAULT_METADATA_FILE)
-    parser.add_argument('-l', '--log', type=str, default=None)
+    parser.add_argument('-v', '--verbose', type=int, default=DEFAULT_VERBOSE)
+    parser.add_argument('-l', '--log', type=str, default=None)  # by default all prints output to console
     parser.add_argument('-a', '--asyncio', action='store_true', default=False)
 
     args = parser.parse_args()
